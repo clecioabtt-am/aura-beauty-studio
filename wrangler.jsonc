@@ -1,0 +1,26 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "aura-beauty-studio",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-06",
+  "workers_dev": true,
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"],
+    "not_found_handling": "single-page-application"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "aura-beauty-db",
+      "database_id": "COLE_AQUI_O_DATABASE_ID_D1",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [{"binding": "MEDIA", "bucket_name": "aura-beauty-media"}],
+  "vars": {
+    "ADMIN_EMAIL": "admin@exemplo.com",
+    "SALON_TIMEZONE": "America/Manaus"
+  }
+}
