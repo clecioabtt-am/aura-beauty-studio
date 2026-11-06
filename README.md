@@ -2,6 +2,32 @@
 
 PWA para salão de beleza com catálogo, agendamentos online, vouchers de desconto, painel gerencial e cards promocionais para divulgação. Código e interface em português brasileiro.
 
+## Correção de login — v1.2 (PBKDF2 / Cloudflare Workers)
+
+**Causa identificada no código anterior:** a senha `123` estava correta no D1, porém a migração 0003 guardou um hash PBKDF2 com **210.000 iterações**, acima do limite de **100.000 iterações** imposto pela Web Crypto API no Cloudflare Workers de produção. Isso causa um erro ao verificar a senha, que era exibido como "Erro inesperado do servidor". Outra possível causa é a falta de migrações no D1 remoto. A versão 1.2 ajusta a criação/verificação de senhas ao limite do Worker e melhora a mensagem de erro quando falta uma tabela.
+
+**Para atualizar uma instalação existente, sem perder clientes, vouchers nem reservas:**
+
+1. Use a versão 1.2 do ZIP, mantendo seu `database_id` real e o bucket R2 em `wrangler.jsonc`.
+2. Na pasta do projeto, execute:
+
+```bash
+npm install
+npx wrangler d1 migrations list aura-beauty-db --remote
+npx wrangler d1 migrations apply aura-beauty-db --remote
+npm run deploy
+```
+
+3. Acesse `/admin.html` e use `gerente@aura.com` e a senha temporária `123` **somente se ainda não tiver alterado sua senha**. Troque-a na primeira entrada.
+
+A migração **0004_cloudflare_pbkdf2_compat.sql** substitui apenas o hash temporário original da migração 0003, por comparação exata; **não redefine senhas já modificadas**, não apaga tabelas, clientes, vouchers ou agendamentos. Execute as migrações também se o Worker atual estiver publicado sem as tabelas do login. Se já configurou uma senha pessoal com um hash mais antigo de 210.000 iterações, essa senha precisa de uma recuperação administrativa separada, sem apagar os demais dados.
+
+**Antes de enviar o ZIP ao GitHub:** confira se seu ID real do D1 foi preservado no `wrangler.jsonc`; a distribuição mantém `COLE_AQUI_O_DATABASE_ID_D1` como marcador, pois não temos acesso ao identificador da sua conta.
+
+**Verificação rápida:** caso o login ainda falhe após as migrações, execute `npx wrangler tail` e faça uma tentativa de login para ver o erro exato. Não compartilhe senhas nem cookies de sessão em capturas de tela.
+
+---
+
 ## Identificadores sugeridos
 
 | Recurso | Nome | Binding |
@@ -78,7 +104,7 @@ Atenção: não exclua o D1 ou a tabela `admin_credentials` após configurar sua
 
 ### 5. Preparar D1 e publicar
 
-**Para quem já publicou o projeto:** faça backup do banco, preserve o mesmo `database_id` no `wrangler.jsonc`, aplique as migrações pendentes e publique novamente. A migração `0003` cria somente a tabela de credenciais e encerra sessões antigas; ela não apaga reservas, serviços ou vouchers. Caso o D1 já tenha uma conta cadastrada, `INSERT OR IGNORE` preserva a conta.
+**Para quem já publicou o projeto:** faça backup do banco, preserve o mesmo `database_id` no `wrangler.jsonc`, aplique as migrações pendentes e publique novamente. As migrações `0003` e `0004` configuram e corrigem a conta inicial, preservando os demais dados; ela não apaga reservas, serviços ou vouchers. Caso o D1 já tenha uma conta cadastrada, `INSERT OR IGNORE` preserva a conta.
 
 
 ```bash
@@ -135,7 +161,8 @@ Abra `http://localhost:8787` (página pública) e `http://localhost:8787/admin.h
 ├─ migrations/
 │  ├─ 0001_initial.sql        Schema, triggers e serviços
 │  ├─ 0002_request_limits.sql Limitador básico
-│  └─ 0003_admin_credentials.sql Login inicial e senha no D1
+│  ├─ 0003_admin_credentials.sql Login inicial e senha no D1
+│  └─ 0004_cloudflare_pbkdf2_compat.sql Corrige hash para produção
 ├─ tests/core.test.mjs       Testes unitários
 ├─ wrangler.jsonc            Bindings e implantação
 └─ package.json
@@ -149,4 +176,4 @@ Abra `http://localhost:8787` (página pública) e `http://localhost:8787/admin.h
 - [D1 batch (transações)](https://developers.cloudflare.com/d1/worker-api/d1-database/)
 - [R2 via Worker](https://developers.cloudflare.com/r2/get-started/workers-api/)
 
-**Versão:** 1.1.0 — Novembro de 2026. Projeto inicial preparado para implantação, ainda não publicado em conta Cloudflare.
+**Versão:** 1.2.0 — Novembro de 2026. Projeto inicial preparado para implantação, ainda não publicado em conta Cloudflare.

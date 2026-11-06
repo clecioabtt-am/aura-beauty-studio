@@ -12,12 +12,12 @@ let timeout;
 function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('show');clearTimeout(timeout);timeout=setTimeout(()=>el.classList.remove('show'),4500)}
 const formVal=(form,name)=>form.elements.namedItem(name)?.value??'';
 const formChecked=(form,name)=>form.elements.namedItem(name)?.checked??false;
-async function start(){try{
+async function start(showErrors=false){try{
   const me=await api('/admin/me');state.email=me.email;
   $('#loginArea').classList.add('hidden');
   if(me.must_change_password){$('#adminArea').classList.add('hidden');$('#passwordGate').classList.remove('hidden');state.data=null;return;}
   $('#passwordGate').classList.add('hidden');await reload();$('#adminArea').classList.remove('hidden');
-}catch{$('#adminArea').classList.add('hidden');$('#passwordGate').classList.add('hidden');$('#loginArea').classList.remove('hidden')}}
+}catch(e){$('#adminArea').classList.add('hidden');$('#passwordGate').classList.add('hidden');$('#loginArea').classList.remove('hidden');if(showErrors)toast(e.message)}}
 async function reload(){state.data=await api('/admin/dashboard');const words=state.data.settings.salon_name.trim().split(/\s+/);const first=words.shift()||'AURA';const rest=words.join(' ')||'BEAUTY STUDIO';document.querySelectorAll('.brand > span:last-child').forEach(el=>{el.textContent=first.toUpperCase();const small=document.createElement('small');small.textContent=rest.toUpperCase();el.appendChild(small)});const n=state.data.bookings.filter(b=>b.status==='pending').length;$('#pendingBadge').textContent=n;render()}
 function navigate(tab){state.tab=tab;document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));$('#tabTitle').textContent=titles[tab];$('#adminNav').closest('.sidebar').classList.remove('open');render()}
 function counts(){const b=state.data.bookings,parts=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'America/Manaus',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date()).map(p=>[p.type,p.value])),today=`${parts.year}-${parts.month}-${parts.day}`;
@@ -102,7 +102,7 @@ async function downloadVoucherCard(v){if(!v)return;const canvas=document.createE
  canvas.toBlob(blob=>{if(!blob){toast('Não foi possível gerar a imagem.');return}const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`voucher-${v.code}.png`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Card promocional PNG gerado!')},'image/png');
 }
 function setupEvents(){
- $('#loginForm').addEventListener('submit',async ev=>{ev.preventDefault();const b=ev.target.querySelector('button');b.disabled=true;try{await send('/admin/login','POST',{email:$('#loginEmail').value,password:$('#loginPassword').value});$('#loginPassword').value='';await start()}catch(e){toast(e.message)}finally{b.disabled=false}});
+ $('#loginForm').addEventListener('submit',async ev=>{ev.preventDefault();const b=ev.target.querySelector('button');b.disabled=true;try{await send('/admin/login','POST',{email:$('#loginEmail').value,password:$('#loginPassword').value});$('#loginPassword').value='';await start(true)}catch(e){toast(e.message)}finally{b.disabled=false}});
  const logout=async()=>{try{await send('/admin/logout','POST',{});}catch{}state.data=null;$('#adminArea').classList.add('hidden');$('#passwordGate').classList.add('hidden');$('#loginArea').classList.remove('hidden');toast('Sessão encerrada.');};
  $('#logoutButton').addEventListener('click',logout);
  $('#gateLogout').addEventListener('click',logout);

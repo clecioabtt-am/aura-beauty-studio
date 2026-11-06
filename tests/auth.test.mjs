@@ -3,12 +3,14 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import worker from '../src/index.js';
 
-const migration=readFileSync(new URL('../migrations/0003_admin_credentials.sql',import.meta.url),'utf8');
-const seedHash=migration.match(/pbkdf2_sha256\$210000\$[0-9a-f]{32}\$[0-9a-f]{64}/)?.[0];
+const migration=readFileSync(new URL('../migrations/0004_cloudflare_pbkdf2_compat.sql',import.meta.url),'utf8');
+const seedHash=migration.match(/pbkdf2_sha256\$100000\$[0-9a-f]{32}\$[0-9a-f]{64}/)?.[0];
+const oldMigration=readFileSync(new URL('../migrations/0003_admin_credentials.sql',import.meta.url),'utf8');
+const legacyHash=oldMigration.match(/pbkdf2_sha256\$210000\$[0-9a-f]{32}\$[0-9a-f]{64}/)?.[0];
 assert.ok(seedHash,'Migração deve conter hash PBKDF2 e não senha legível');
 
-function dbMock(){
-  const credentials={email:'gerente@aura.com',password_hash:seedHash,must_change_password:1};
+function dbMock(passwordHash=seedHash){
+  const credentials={email:'gerente@aura.com',password_hash:passwordHash,must_change_password:1};
   const sessions=new Map();const limits=new Map();
   function prepared(query,values=[]){
     return {
@@ -67,4 +69,28 @@ test('Login inicial / troca obrigatória / alteração de senha / invalidação 
   assert.equal((await newLogin.json()).must_change_password,false);
   const newCookie=newLogin.headers.get('set-cookie').split(';')[0];
   assert.deepEqual(await (await request(env,'/admin/me','GET',null,newCookie)).json(),{email:'gerente@aura.com',must_change_password:false});
+});
+
+
+test('Hash legado de 210.000 iterações retorna diagnóstico de migração 0004, não erro 500',async()=>{
+  const env={DB:dbMock(legacyHash),SALON_TIMEZONE:'America/Manaus'};
+  const result=await request(env,'/admin/login','POST',{email:'gerente@aura.com',password:'123'});
+  assert.equal(result.status,503);
+  assert.match((await result.json()).error,/migrações.*0004/i);
+});
+
+test('Migração pendente de request_limits aparece como instrução acionável',async()=>{
+  const env={DB:{prepare(){throw Error('D1_ERROR: no such table: request_limits');}}};
+  const result=await request(env,'/admin/login','POST',{email:'gerente@aura.com',password:'123'});
+  assert.equal(result.status,503);
+  assert.match((await result.json()).error,/request_limits.*migrations apply aura-beauty-db --remote/);
+});
+
+test('Migração pendente de admin_credentials aparece como instrução acionável',async()=>{
+  const db=dbMock();
+  const oldPrepare=db.prepare;
+  db.prepare=(sql)=>{if(sql.includes('FROM admin_credentials'))throw Error('D1_ERROR: no such table: admin_credentials');return oldPrepare(sql)};
+  const result=await request({DB:db},'/admin/login','POST',{email:'gerente@aura.com',password:'123'});
+  assert.equal(result.status,503);
+  assert.match((await result.json()).error,/admin_credentials.*migrations apply aura-beauty-db --remote/);
 });

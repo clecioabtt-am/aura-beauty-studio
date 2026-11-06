@@ -2,6 +2,8 @@ import {discountPrice, saneText, validDate, validTime, dateForTimezone, withinBo
 
 const COOKIE='aura_session';
 const SESSION_DAYS=7;
+// Limite da API Web Crypto PBKDF2 no Cloudflare Workers de produção.
+const MAX_PBKDF2_ITERATIONS=100000;
 class HttpError extends Error { constructor(status,message) { super(message); this.status=status; } }
 const fail=(status,message)=>{throw new HttpError(status,message);};
 const json=(obj,status=200,headers={})=>new Response(JSON.stringify(obj),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers}});
@@ -16,7 +18,8 @@ async function verifyPassword(password, stored) {
   const fields=(stored||'').split('$');
   if(fields.length!==4 || fields[0]!=='pbkdf2_sha256') return false;
   const rounds=Number(fields[1]);
-  if(!Number.isInteger(rounds)||rounds<100000||rounds>500000||!/^[a-f0-9]{32}$/.test(fields[2])||!/^[a-f0-9]{64}$/.test(fields[3]))return false;
+  if(!Number.isInteger(rounds)||rounds<100000||!/^[a-f0-9]{32}$/.test(fields[2])||!/^[a-f0-9]{64}$/.test(fields[3]))return false;
+  if(rounds>MAX_PBKDF2_ITERATIONS)fail(503,'Hash da senha incompatível com Cloudflare Workers. Execute as migrações pendentes do D1 (0004).');
   const salt=Uint8Array.from(fields[2].match(/../g),x=>parseInt(x,16));
   const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveBits']);
   const raw=await crypto.subtle.deriveBits({name:'PBKDF2',salt,iterations:rounds,hash:'SHA-256'},key,256);
@@ -26,9 +29,9 @@ async function verifyPassword(password, stored) {
 async function passwordHash(password) {
   const salt=crypto.getRandomValues(new Uint8Array(16));
   const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveBits']);
-  const derived=await crypto.subtle.deriveBits({name:'PBKDF2',salt,iterations:210000,hash:'SHA-256'},key,256);
+  const derived=await crypto.subtle.deriveBits({name:'PBKDF2',salt,iterations:MAX_PBKDF2_ITERATIONS,hash:'SHA-256'},key,256);
   const hex=buf=>Array.from(new Uint8Array(buf),x=>x.toString(16).padStart(2,'0')).join('');
-  return `pbkdf2_sha256$210000$${hex(salt)}$${hex(derived)}`;
+  return `pbkdf2_sha256$${MAX_PBKDF2_ITERATIONS}$${hex(salt)}$${hex(derived)}`;
 }
 function sessionCookie(token, request, maxAge) {
   const secure=new URL(request.url).protocol==='https:'?'; Secure':'';
@@ -286,8 +289,14 @@ export default {
       if(!new URL(req.url).pathname.startsWith('/api/'))return env.ASSETS.fetch(req);
       return await route(req,env);
     }catch(e){
-      if(!(e instanceof HttpError))console.error('API error',new URL(req.url).pathname,String(e?.message||e));
-      return json({error:e instanceof HttpError?e.message:'Erro inesperado do servidor.'},e instanceof HttpError?e.status:500);
+      if(!(e instanceof HttpError))console.error('API error',new URL(req.url).pathname,String(e?.message||e),String(e?.cause?.message||''));
+      // Mensagem operacional sem revelar queries ou dados sensíveis do banco ao visitante.
+      const details=`${String(e?.message||'')} ${String(e?.cause?.message||'')}`;
+      const missing=details.match(/no such table:\s*(?:main\.)?[`\"]?([a-z_]+)[`\"]?/i);
+      const expectedTables=new Set(['request_limits','admin_credentials','admin_sessions','salon_settings','services','vouchers','bookings','booking_slots']);
+      if(!(e instanceof HttpError) && missing && expectedTables.has(missing[1]))
+        return json({error:`O banco D1 está sem a tabela ${missing[1]}. Execute: npx wrangler d1 migrations apply aura-beauty-db --remote`},503);
+      return json({error:e instanceof HttpError?e.message:'Erro inesperado do servidor. Consulte os logs do Cloudflare Worker.'},e instanceof HttpError?e.status:500);
     }
   }
 };
