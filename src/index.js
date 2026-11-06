@@ -23,6 +23,13 @@ async function verifyPassword(password, stored) {
   const actual=Array.from(new Uint8Array(raw),x=>x.toString(16).padStart(2,'0')).join('');
   return strEq(actual,fields[3]);
 }
+async function passwordHash(password) {
+  const salt=crypto.getRandomValues(new Uint8Array(16));
+  const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveBits']);
+  const derived=await crypto.subtle.deriveBits({name:'PBKDF2',salt,iterations:210000,hash:'SHA-256'},key,256);
+  const hex=buf=>Array.from(new Uint8Array(buf),x=>x.toString(16).padStart(2,'0')).join('');
+  return `pbkdf2_sha256$210000$${hex(salt)}$${hex(derived)}`;
+}
 function sessionCookie(token, request, maxAge) {
   const secure=new URL(request.url).protocol==='https:'?'; Secure':'';
   return `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/api; Max-Age=${maxAge}${secure}`;
@@ -33,6 +40,9 @@ async function admin(req,env) {
   if(!/^[a-f0-9]{64}$/.test(token))fail(401,'Acesso administrativo necessário.');
   const entry=await env.DB.prepare('SELECT token_hash FROM admin_sessions WHERE token_hash=? AND expires_at>?').bind(await hash(token),datetime()).first();
   if(!entry)fail(401,'Sua sessão expirou. Faça login novamente.');
+  const credentials=await env.DB.prepare('SELECT email,must_change_password FROM admin_credentials WHERE id=1').first();
+  if(!credentials)fail(503,'Execute a migração de credenciais no D1.');
+  return credentials;
 }
 function validateOrigin(req) {
   if(!['POST','PATCH','PUT','DELETE'].includes(req.method))return;
@@ -48,7 +58,7 @@ const asId=(v)=>saneText(v,100);
 const price=(v)=>Number(v);
 async function rateLimit(env,req,namespace,limit,periodSeconds){
   const raw=req.headers.get('CF-Connecting-IP')||'unknown';
-  const ipHash=await hash(`${namespace}|${raw}|${env.ADMIN_PASSWORD_HASH||'salt'}`);
+  const ipHash=await hash(`${namespace}|${raw}|${env.RATE_LIMIT_SALT||'aura-rate-limiter'}`);
   const key=`${namespace}:${ipHash}`;
   const from=new Date(Date.now()-periodSeconds*1000).toISOString();
   const row=await env.DB.prepare('SELECT hits,started_at FROM request_limits WHERE key=?').bind(key).first();
@@ -159,20 +169,40 @@ async function route(req,env){
     await rateLimit(env,req,'login',8,900);
     const x=await body(req);
     const email=saneText(x.email,180).toLowerCase(),password=String(x.password||'');
-    if(!env.ADMIN_PASSWORD_HASH||!env.ADMIN_EMAIL)fail(503,'Configure o administrador conforme o README.');
-    if(password.length>250||!strEq(email,saneText(env.ADMIN_EMAIL,180).toLowerCase())||!await verifyPassword(password,env.ADMIN_PASSWORD_HASH))fail(401,'E-mail ou senha incorretos.');
+    const credentials=await env.DB.prepare('SELECT email,password_hash,must_change_password FROM admin_credentials WHERE id=1').first();
+    if(!credentials)fail(503,'Execute a migração de credenciais no D1.');
+    if(password.length>250||!strEq(email,credentials.email.toLowerCase())||!await verifyPassword(password,credentials.password_hash))fail(401,'E-mail ou senha incorretos.');
     const token=randToken();
     await env.DB.prepare('INSERT INTO admin_sessions(token_hash,created_at,expires_at) VALUES(?,?,?)').bind(await hash(token),datetime(),datetime(SESSION_DAYS)).run();
-    return json({ok:true},200,{'Set-Cookie':sessionCookie(token,req,SESSION_DAYS*86400)});
+    return json({ok:true,must_change_password:!!credentials.must_change_password},200,{'Set-Cookie':sessionCookie(token,req,SESSION_DAYS*86400)});
   }
   if(p.startsWith('/api/admin/')){
-    await admin(req,env);
-    if(m==='GET'&&p==='/api/admin/me')return json({email:env.ADMIN_EMAIL});
+    const credentials=await admin(req,env);
+    if(m==='GET'&&p==='/api/admin/me')return json({email:credentials.email,must_change_password:!!credentials.must_change_password});
     if(m==='POST'&&p==='/api/admin/logout'){
       const token=readCookie(req,COOKIE);
       await env.DB.prepare('DELETE FROM admin_sessions WHERE token_hash=?').bind(await hash(token)).run();
       return json({ok:true},200,{'Set-Cookie':sessionCookie('',req,0)});
     }
+    if(m==='PATCH'&&p==='/api/admin/password'){
+      await rateLimit(env,req,'password-change',12,3600);
+      const x=await body(req);
+      const current=String(x.current_password||''),next=String(x.new_password||''),confirm=String(x.confirm_password||'');
+      if(next!==confirm)fail(422,'A confirmação da nova senha não confere.');
+      if(next.length<12||next.length>128||new TextEncoder().encode(next).length>256)fail(422,'A nova senha deve ter entre 12 e 128 caracteres.');
+      if(!/[a-zA-ZÀ-ÿ]/.test(next)||!/[0-9]/.test(next))fail(422,'A nova senha deve conter letras e números.');
+      if(current===next)fail(422,'A nova senha precisa ser diferente da atual.');
+      if(current.length>250)fail(401,'Senha atual incorreta.');
+      const old=await env.DB.prepare('SELECT password_hash FROM admin_credentials WHERE id=1').first();
+      if(!old||!await verifyPassword(current,old.password_hash))fail(401,'Senha atual incorreta.');
+      const updated=await env.DB.batch([
+        env.DB.prepare('UPDATE admin_credentials SET password_hash=?,must_change_password=0,updated_at=CURRENT_TIMESTAMP WHERE id=1 AND password_hash=?').bind(await passwordHash(next),old.password_hash),
+        env.DB.prepare('DELETE FROM admin_sessions')
+      ]);
+      if(!updated[0].meta?.changes)fail(409,'A senha foi alterada em outra sessão. Faça login novamente.');
+      return json({ok:true,relogin_required:true},200,{'Set-Cookie':sessionCookie('',req,0)});
+    }
+    if(credentials.must_change_password)fail(403,'Por segurança, altere a senha inicial antes de usar o painel.');
     if(m==='GET'&&p==='/api/admin/dashboard'){
       const [bookings,services,vouchers,settings]=await Promise.all([
         env.DB.prepare(`SELECT b.*,s.name AS service_name,v.code AS voucher_code FROM bookings b JOIN services s ON s.id=b.service_id LEFT JOIN vouchers v ON v.id=b.voucher_id ORDER BY b.appointment_date DESC,b.appointment_time DESC,b.created_at DESC LIMIT 400`).all(),

@@ -1,7 +1,7 @@
 {
   "name": "aura-beauty-studio",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "description": "PWA de agendamentos, painel gerencial e vouchers para salão de beleza",
   "scripts": {
@@ -9,7 +9,6 @@
     "deploy": "wrangler deploy",
     "db:local": "wrangler d1 migrations apply aura-beauty-db --local",
     "db:remote": "wrangler d1 migrations apply aura-beauty-db --remote",
-    "password:hash": "node scripts/hash-password.mjs",
     "test": "node --test tests/*.test.mjs"
   },
   "devDependencies": {"wrangler": "^4.0.0"},

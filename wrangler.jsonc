@@ -20,7 +20,6 @@
   ],
   "r2_buckets": [{"binding": "MEDIA", "bucket_name": "aura-beauty-media-clecioam26"}],
   "vars": {
-    "ADMIN_EMAIL": "admin@exemplo.com",
     "SALON_TIMEZONE": "America/Manaus"
   }
 }

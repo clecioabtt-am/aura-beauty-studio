@@ -24,7 +24,7 @@ PWA para salão de beleza com catálogo, agendamentos online, vouchers de descon
 - Painel gerencial: visão geral, solicitações, clientes agendados (apenas confirmados), histórico até 400 registros, serviços, vouchers, configurações e horários.
 - Vouchers privados ou publicados na vitrine; o gerente define código manual ou deixa gerar um código aleatório; upload de banner para R2; download do card promocional em PNG (1080 × 1350), ideal para campanhas.
 - Botão de WhatsApp no agendamento confirmado abre mensagem pronta para o gerente enviar. **Não envia mensagens automaticamente.**
-- Sessão administrativa com cookie HttpOnly/SameSite, senha com hash PBKDF2-SHA256 e salt exclusivo gerados localmente; proteção básica de tentativas por IP, validação do Origin e upload validado.
+- Sessão administrativa com cookie HttpOnly/SameSite, senha com hash PBKDF2-SHA256 e salt exclusivo armazenados no D1, troca obrigatória no primeiro acesso e nova troca no painel; proteção básica de tentativas por IP, validação do Origin e upload validado.
 
 ### Regras de negócio
 
@@ -62,25 +62,24 @@ npx wrangler r2 bucket create aura-beauty-media-clecioam26
 
 A ligação `MEDIA` do R2 já está preparada em `wrangler.jsonc`. Não é necessário tornar o bucket público; as imagens são lidas pelo próprio Worker.
 
-### 4. Preparar credenciais do gerente
+### 4. Login inicial do gerente (já preparado)
 
-Edite `ADMIN_EMAIL` em `wrangler.jsonc` com o e-mail do gerente. Não use `admin@exemplo.com` em produção.
+O sistema agora mantém os dados de acesso do gerente no **D1**, por meio da nova migração `0003_admin_credentials.sql`. Não é necessário configurar `ADMIN_PASSWORD_HASH` ou `ADMIN_EMAIL` no Cloudflare.
 
-Para gerar o hash de sua senha (mínimo de 12 caracteres):
+- **E-mail:** `gerente@aura.com`
+- **Senha inicial temporária:** `123`
+- **Painel:** `/admin.html`
 
-```bash
-npm run password:hash
-```
+**ATENÇÃO:** `123` é uma senha muito fraca, colocada apenas a pedido para o primeiro acesso. É obrigatório trocá-la antes de acessar qualquer informação do painel. O D1 armazena somente o hash PBKDF2-SHA256 com salt aleatório, jamais a senha legível. Como o login inicial é conhecido, **publique apenas quando puder entrar imediatamente e trocar a senha**, preferencialmente antes de divulgar a URL.
 
-Copie o hash que aparecer (uma única linha iniciando em `pbkdf2_sha256$...`). Envie **esse hash**, nunca a senha em texto puro, como secret do Worker:
+Ao entrar pela primeira vez, você verá uma tela de troca obrigatória. Escolha uma senha nova com no mínimo 12 caracteres, contendo letras e números. Após salvar, o sistema encerra todas as sessões e pede login com a senha nova. Depois, sempre poderá alterá-la em **Painel → Segurança da conta** (informando a senha atual). Uma nova migração ou novo deploy **não redefine** sua senha.
 
-```bash
-npx wrangler secret put ADMIN_PASSWORD_HASH
-```
-
-O terminal pedirá o valor secreto. Não inclua a senha nem o hash em arquivos commitados. Para testes **locais**, copie `.dev.vars.example` para `.dev.vars` e preencha `ADMIN_PASSWORD_HASH`. O arquivo `.dev.vars` já está no `.gitignore`.
+Atenção: não exclua o D1 ou a tabela `admin_credentials` após configurar sua senha, pois isso remove o login permanente.
 
 ### 5. Preparar D1 e publicar
+
+**Para quem já publicou o projeto:** faça backup do banco, preserve o mesmo `database_id` no `wrangler.jsonc`, aplique as migrações pendentes e publique novamente. A migração `0003` cria somente a tabela de credenciais e encerra sessões antigas; ela não apaga reservas, serviços ou vouchers. Caso o D1 já tenha uma conta cadastrada, `INSERT OR IGNORE` preserva a conta.
+
 
 ```bash
 npx wrangler d1 migrations apply aura-beauty-db --remote
@@ -89,12 +88,12 @@ npm run deploy
 
 O comando de migração cria todas as tabelas e inclui 8 serviços como exemplo. Como o banco é novo, não interfere em bancos de outros projetos. O deploy retornará a URL, normalmente `https://aura-beauty-studio.<seu-subdominio>.workers.dev`.
 
-**Ordem importante:** crie D1 e R2, insira o UUID, crie o secret, execute migrations e só então publique. Se publicar antes das migrations, as rotas retornarão erro de tabela inexistente.
+**Ordem importante:** crie D1 e R2, insira o UUID, execute as migrations e só então publique. Se publicar antes das migrations, as rotas retornarão erro de tabela inexistente.
 
 ### 6. Configurar seu salão
 
 1. Abra `https://<sua-url-do-worker>/admin.html`.
-2. Entre com `ADMIN_EMAIL` e a **senha original que você criou**.
+2. Entre com **gerente@aura.com** e a senha temporária **123**. Defina uma nova senha obrigatoriamente na primeira entrada e entre novamente com ela.
 3. No menu **Configurações**, altere nome do salão, endereço, WhatsApp, Instagram e dias/horários.
 4. Em **Serviços e valores**, personalize preços, nomes, categorias, duração e imagens.
 5. Em **Vouchers e promoções**, crie promoções, defina descontos, uso máximo, validade, banner e visibilidade pública.
@@ -103,8 +102,6 @@ O comando de migração cria todas as tabelas e inclui 8 serviços como exemplo.
 ## Testes em desenvolvimento
 
 ```bash
-cp .dev.vars.example .dev.vars
-# Edite .dev.vars com um hash de senha local.
 npx wrangler d1 migrations apply aura-beauty-db --local
 npm run dev
 ```
@@ -113,7 +110,7 @@ Abra `http://localhost:8787` (página pública) e `http://localhost:8787/admin.h
 
 ## Checklist de produção
 
-- Use senha exclusiva e e-mail real; não divulgue cookies de sessão nem links privados de acompanhamento.
+- Troque imediatamente a senha temporária `123` por outra forte e exclusiva; não divulgue cookies de sessão nem links privados de acompanhamento.
 - Adicione informações reais do salão; valores e imagens atuais são ilustrativos. Ajuste políticas de privacidade e retenção de dados à LGPD, incluindo meio de solicitação de exclusão e política de backups.
 - Para lançamentos públicos com tráfego maior, avalie Cloudflare Turnstile adicionalmente ao limitador simples do projeto, monitoramento e rotina de backup do D1/R2.
 - A configuração inicial considera apenas um gerente. Para salão com equipe, criar profissionais, agendas individuais, permissões e gestão de ausências.
@@ -137,8 +134,8 @@ Abra `http://localhost:8787` (página pública) e `http://localhost:8787/admin.h
 │  └─ lib.js                  Validações e horários
 ├─ migrations/
 │  ├─ 0001_initial.sql        Schema, triggers e serviços
-│  └─ 0002_request_limits.sql Limitador básico
-├─ scripts/hash-password.mjs Criar hash seguro de senha
+│  ├─ 0002_request_limits.sql Limitador básico
+│  └─ 0003_admin_credentials.sql Login inicial e senha no D1
 ├─ tests/core.test.mjs       Testes unitários
 ├─ wrangler.jsonc            Bindings e implantação
 └─ package.json
@@ -152,4 +149,4 @@ Abra `http://localhost:8787` (página pública) e `http://localhost:8787/admin.h
 - [D1 batch (transações)](https://developers.cloudflare.com/d1/worker-api/d1-database/)
 - [R2 via Worker](https://developers.cloudflare.com/r2/get-started/workers-api/)
 
-**Versão:** 1.0.0 — Novembro de 2026. Projeto inicial preparado para implantação, ainda não publicado em conta Cloudflare.
+**Versão:** 1.1.0 — Novembro de 2026. Projeto inicial preparado para implantação, ainda não publicado em conta Cloudflare.

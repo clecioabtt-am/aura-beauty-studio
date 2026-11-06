@@ -5,14 +5,19 @@ const num=v=>Number(v)||0;
 const dataText=d=>d?d.split('-').reverse().join('/'):'—';
 const api=async(path,options={})=>{const r=await fetch('/api'+path,{credentials:'same-origin',...options});let data;try{data=await r.json()}catch{throw Error('Não foi possível conectar ao servidor.')};if(!r.ok)throw Error(data.error||'Erro na operação.');return data};
 const send=(path,method,body)=>api(path,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-const state={data:null,tab:'overview',editing:null};
-const titles={overview:'Visão geral',pending:'Solicitações pendentes',confirmed:'Clientes agendados',all:'Todos os agendamentos',services:'Serviços e valores',vouchers:'Vouchers e promoções',settings:'Configurações do salão'};
+const state={data:null,tab:'overview',editing:null,email:'gerente@aura.com'};
+const titles={overview:'Visão geral',pending:'Solicitações pendentes',confirmed:'Clientes agendados',all:'Todos os agendamentos',services:'Serviços e valores',vouchers:'Vouchers e promoções',settings:'Configurações do salão',security:'Segurança da conta'};
 const statuses={pending:'Pendente',confirmed:'Confirmado',rejected:'Recusado',cancelled:'Cancelado',completed:'Concluído'};
 let timeout;
 function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('show');clearTimeout(timeout);timeout=setTimeout(()=>el.classList.remove('show'),4500)}
 const formVal=(form,name)=>form.elements.namedItem(name)?.value??'';
 const formChecked=(form,name)=>form.elements.namedItem(name)?.checked??false;
-async function start(){try{await api('/admin/me');await reload();$('#loginArea').classList.add('hidden');$('#adminArea').classList.remove('hidden')}catch{$('#adminArea').classList.add('hidden');$('#loginArea').classList.remove('hidden')}}
+async function start(){try{
+  const me=await api('/admin/me');state.email=me.email;
+  $('#loginArea').classList.add('hidden');
+  if(me.must_change_password){$('#adminArea').classList.add('hidden');$('#passwordGate').classList.remove('hidden');state.data=null;return;}
+  $('#passwordGate').classList.add('hidden');await reload();$('#adminArea').classList.remove('hidden');
+}catch{$('#adminArea').classList.add('hidden');$('#passwordGate').classList.add('hidden');$('#loginArea').classList.remove('hidden')}}
 async function reload(){state.data=await api('/admin/dashboard');const words=state.data.settings.salon_name.trim().split(/\s+/);const first=words.shift()||'AURA';const rest=words.join(' ')||'BEAUTY STUDIO';document.querySelectorAll('.brand > span:last-child').forEach(el=>{el.textContent=first.toUpperCase();const small=document.createElement('small');small.textContent=rest.toUpperCase();el.appendChild(small)});const n=state.data.bookings.filter(b=>b.status==='pending').length;$('#pendingBadge').textContent=n;render()}
 function navigate(tab){state.tab=tab;document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));$('#tabTitle').textContent=titles[tab];$('#adminNav').closest('.sidebar').classList.remove('open');render()}
 function counts(){const b=state.data.bookings,parts=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'America/Manaus',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date()).map(p=>[p.type,p.value])),today=`${parts.year}-${parts.month}-${parts.day}`;
@@ -36,17 +41,25 @@ function servicesCards(){return `<section class="admin-section"><div class="admi
 function settingsForm(){const s=state.data.settings,h=s.opening_hours;const days=['Domingo','Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'];const times=[];for(let x=7*60;x<=23*60;x+=30){times.push(`${String(Math.floor(x/60)).padStart(2,'0')}:${String(x%60).padStart(2,'0')}`)}
  const sel=(name,val)=>`<select name="${name}">${times.map(t=>`<option value="${t}" ${val===t?'selected':''}>${t}</option>`).join('')}</select>`;
  return `<section class="admin-section"><div class="admin-section-heading"><div><h2>Identidade e funcionamento</h2><p>Personalize os dados que aparecem no site. Segunda-feira vem fechada como padrão.</p></div></div><form id="settingsForm" class="admin-settings-form"><div class="field-row"><div class="form-field"><label>Nome do salão</label><input name="salon_name" value="${esc(s.salon_name)}" required></div><div class="form-field"><label>Frase de destaque</label><input name="tagline" value="${esc(s.tagline)}" required></div></div><div class="field-row"><div class="form-field"><label>WhatsApp com DDD (55 + número)</label><input name="whatsapp" placeholder="5592999999999" value="${esc(s.whatsapp)}"></div><div class="form-field"><label>Instagram (sem @)</label><input name="instagram" value="${esc(s.instagram)}"></div></div><div class="form-field"><label>Endereço de atendimento</label><input name="address" value="${esc(s.address)}"></div><h3 style="font:400 26px 'Playfair Display';margin:20px 0">Horário de funcionamento</h3><p class="small-muted">O sistema oferece horários em intervalos de 30 minutos. Agendamentos existentes não são alterados automaticamente se você mudar estes horários.</p><div class="settings-hours">${days.map((day,i)=>{const t=h[i],open=!!t;return `<div class="hours-card"><label>${day}<span><input type="checkbox" name="day${i}" ${open?'checked':''}> Aberto</span></label><div>${sel(`from${i}`,t?.[0]||'09:00')}${sel(`to${i}`,t?.[1]||'18:00')}</div></div>`}).join('')}</div><button class="button button-dark" style="margin-top:22px" type="submit">Salvar configurações ↗</button></form></section>`}
+function securityForm(){return `<section class="admin-section security-section"><div class="admin-section-heading"><div><h2>Segurança da conta</h2><p>Altere sua senha sempre que necessário. Todas as sessões serão encerradas após a alteração.</p></div></div><div class="security-info"><span class="eyebrow">GERENTE RESPONSÁVEL</span><strong>${esc(state.email)}</strong><span class="small-muted">Sua senha não é exibida ou armazenada em texto puro.</span></div><form id="regularPasswordForm" class="password-form admin-settings-form"><div class="form-field"><label>Senha atual</label><input name="current_password" type="password" required autocomplete="current-password"></div><div class="form-field"><label>Nova senha (mínimo 12 caracteres, letras e números)</label><input name="new_password" type="password" minlength="12" maxlength="128" required autocomplete="new-password"></div><div class="form-field"><label>Confirmar nova senha</label><input name="confirm_password" type="password" minlength="12" maxlength="128" required autocomplete="new-password"></div><button class="button button-dark" type="submit">Salvar nova senha ↗</button></form></section>`}
+async function changePassword(ev){ev.preventDefault();const f=ev.currentTarget,b=f.querySelector('[type="submit"]');b.disabled=true;
+  try{
+    await send('/admin/password','PATCH',{current_password:formVal(f,'current_password'),new_password:formVal(f,'new_password'),confirm_password:formVal(f,'confirm_password')});
+    f.reset();state.data=null;$('#adminArea').classList.add('hidden');$('#passwordGate').classList.add('hidden');$('#loginArea').classList.remove('hidden');$('#loginPassword').value='';
+    toast('Senha atualizada! Entre novamente usando sua nova senha.');
+  }catch(e){toast(e.message)}finally{b.disabled=false}
+}
 function render(){if(!state.data)return;let html='';if(state.tab==='overview')html=overview();else if(['pending','confirmed','all'].includes(state.tab)){
   const filtered=state.data.bookings.filter(x=>state.tab==='all'||x.status===(state.tab==='pending'?'pending':'confirmed'));
   html=`<section class="admin-section"><div class="admin-section-heading"><div><h2>${titles[state.tab]}</h2><p>${filtered.length} agendamento(s) encontrados. O histórico mostra até 400 registros recentes.</p></div></div>${bookingTable(filtered)}</section>`;
- }else if(state.tab==='services')html=servicesCards();else if(state.tab==='vouchers')html=voucherCards();else if(state.tab==='settings')html=settingsForm();
+ }else if(state.tab==='services')html=servicesCards();else if(state.tab==='vouchers')html=voucherCards();else if(state.tab==='settings')html=settingsForm();else if(state.tab==='security')html=securityForm();
  $('#dashboardTab').innerHTML=html;wireStatus();document.querySelectorAll('[data-goto]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.goto)));
  $('#addService')?.addEventListener('click',()=>editService(null));$('#addVoucher')?.addEventListener('click',()=>editVoucher(null));
  document.querySelectorAll('[data-editservice]').forEach(b=>b.addEventListener('click',()=>editService(state.data.services.find(s=>s.id===b.dataset.editservice))));
  document.querySelectorAll('[data-editvoucher]').forEach(b=>b.addEventListener('click',()=>editVoucher(state.data.vouchers.find(v=>v.id===b.dataset.editvoucher))));
  document.querySelectorAll('[data-downloadvoucher]').forEach(b=>b.addEventListener('click',()=>downloadVoucherCard(state.data.vouchers.find(v=>v.id===b.dataset.downloadvoucher))));
  document.querySelectorAll('[data-copy]').forEach(b=>b.addEventListener('click',()=>copy(b.dataset.copy)));
- $('#settingsForm')?.addEventListener('submit',saveSettings);
+ $('#settingsForm')?.addEventListener('submit',saveSettings);$('#regularPasswordForm')?.addEventListener('submit',changePassword);
 }
 function options(services,selected){return services.map(s=>`<option value="${esc(s.id)}" ${s.id===selected?'selected':''}>${esc(s.name)} (${brl(s.price_cents)})</option>`).join('')}
 function editService(s){state.editing={type:'service',id:s?.id||null};$('#editorEyebrow').textContent='SERVIÇO DO SALÃO';$('#editorTitle').textContent=s?'Editar serviço':'Novo serviço';
@@ -90,7 +103,10 @@ async function downloadVoucherCard(v){if(!v)return;const canvas=document.createE
 }
 function setupEvents(){
  $('#loginForm').addEventListener('submit',async ev=>{ev.preventDefault();const b=ev.target.querySelector('button');b.disabled=true;try{await send('/admin/login','POST',{email:$('#loginEmail').value,password:$('#loginPassword').value});$('#loginPassword').value='';await start()}catch(e){toast(e.message)}finally{b.disabled=false}});
- $('#logoutButton').addEventListener('click',async()=>{try{await send('/admin/logout','POST',{});}catch{}state.data=null;$('#adminArea').classList.add('hidden');$('#loginArea').classList.remove('hidden');toast('Sessão encerrada.');});
+ const logout=async()=>{try{await send('/admin/logout','POST',{});}catch{}state.data=null;$('#adminArea').classList.add('hidden');$('#passwordGate').classList.add('hidden');$('#loginArea').classList.remove('hidden');toast('Sessão encerrada.');};
+ $('#logoutButton').addEventListener('click',logout);
+ $('#gateLogout').addEventListener('click',logout);
+ $('#firstPasswordForm').addEventListener('submit',changePassword);
  document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.tab)));
  $('#refreshDashboard').addEventListener('click',async()=>{try{await reload();toast('Dados atualizados.')}catch(e){toast(e.message)}});
  $('#quickVoucher').addEventListener('click',()=>editVoucher(null));$('#editorClose').addEventListener('click',()=>$('#editorDialog').close());
