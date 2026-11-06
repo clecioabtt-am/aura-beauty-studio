@@ -14,11 +14,11 @@
     {
       "binding": "DB",
       "database_name": "aura-beauty-db",
-      "database_id": "09f978c2-8f18-45e6-993a-e498aa4f7016",
+      "database_id": "COLE_AQUI_O_DATABASE_ID_D1",
       "migrations_dir": "migrations"
     }
   ],
-  "r2_buckets": [{"binding": "MEDIA", "bucket_name": "aura-beauty-media"}],
+  "r2_buckets": [{"binding": "MEDIA", "bucket_name": "aura-beauty-media-clecioam26"}],
   "vars": {
     "ADMIN_EMAIL": "admin@exemplo.com",
     "SALON_TIMEZONE": "America/Manaus"

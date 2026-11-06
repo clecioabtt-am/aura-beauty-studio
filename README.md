@@ -9,7 +9,7 @@ PWA para salão de beleza com catálogo, agendamentos online, vouchers de descon
 | Repositório GitHub | `aura-beauty-studio` | — |
 | Cloudflare Worker | `aura-beauty-studio` | — |
 | Cloudflare D1 | `aura-beauty-db` | `DB` |
-| Cloudflare R2 | `aura-beauty-media` | `MEDIA` |
+| Cloudflare R2 | `aura-beauty-media-clecioam26` | `MEDIA` |
 
 **Arquitetura:** Cloudflare Worker em JavaScript (API), Cloudflare Static Assets (interface HTML/CSS/JS), D1 (cadastros, reservas, vouchers, sessões) e R2 (banners JPG/PNG/WebP). Sem infraestrutura adicional e sem serviço pago de imagens obrigatório.
 
@@ -57,7 +57,7 @@ Copie o UUID `database_id` retornado e substitua `COLE_AQUI_O_DATABASE_ID_D1` de
 ### 3. Criar o bucket R2
 
 ```bash
-npx wrangler r2 bucket create aura-beauty-media
+npx wrangler r2 bucket create aura-beauty-media-clecioam26
 ```
 
 A ligação `MEDIA` do R2 já está preparada em `wrangler.jsonc`. Não é necessário tornar o bucket público; as imagens são lidas pelo próprio Worker.
