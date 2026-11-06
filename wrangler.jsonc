@@ -14,7 +14,7 @@
     {
       "binding": "DB",
       "database_name": "aura-beauty-db",
-      "database_id": "COLE_AQUI_O_DATABASE_ID_D1",
+      "database_id": "09f978c2-8f18-45e6-993a-e498aa4f7016",
       "migrations_dir": "migrations"
     }
   ],
